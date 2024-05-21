@@ -7,7 +7,7 @@ def get_total_number(inPath, fileName):
     with open(os.path.join(inPath, fileName), 'r') as fr:
         for line in fr:
             line_split = line.split()
-            return int(line_split[0]), int(line_split[1]), int(line_split[2])
+            return int(line_split[0]), int(line_split[1]), int(line_split[2])  # 实体，关系，时间点的个数
 
 def load_quadruples(inPath, fileName, num_r):
     quadrupleList = []
@@ -60,6 +60,16 @@ def load_list(inPath, entityDictPath, relationDictPath):
     return entity_list, relation_list
 
 def get_outputs(dataset, s_list, p_list, t_list, num_rels, k, is_multi_step=False):
+    """
+    :param dataset: 数据集
+    :param s_list: 头实体列表
+    :param p_list: 关系列表
+    :param t_list: 时间点列表
+    :param num_rels: 关系数量
+    :param k: 缩放因子
+    :param is_multi_step: 是否是多步骤处理
+    :return: 计算给定数据集的输出矩阵，用于模型预测和评估
+    """
     outputs = []
     if not is_multi_step:
         freq_graph = sp.load_npz('./data/{}/history_seq/h_r_history_train_valid.npz'.format(dataset))
@@ -86,20 +96,41 @@ def get_outputs(dataset, s_list, p_list, t_list, num_rels, k, is_multi_step=Fals
     return torch.tensor(outputs)
 
 def sort_and_rank(score, target):
+    """
+    :param score: 分数张量
+    :param target: 目标张量
+    :return: 对预测结果进行排序，并确定目标在排序结果中的位置
+    """
     _, indices = torch.sort(score, dim=1, descending=True)
-    indices = torch.nonzero(indices == target.view(-1, 1))
+    indices = torch.nonzero(indices == target.view(-1, 1))  # target.view(-1, 1) 将目标实体 target 重新形状为一个二维张量（N, 1），然后进行比较返回非零元素的索引
     indices = indices[:, 1].view(-1)
     return indices
 
 # return MRR (raw), and Hits @ (1, 3, 10)
 def calc_raw_mrr(score, labels, hits=[]):
+    """
+    :param score: 预测的评分矩阵，形状为（N,M） N是样本数量，M是候选项的数量
+    :param labels: 目标实体的索引，形状为（N,）
+    :param hits: Hits@k的阈值列表
+    :return: mrr：平均倒数排名 (Mean Reciprocal Rank)。
+            hits1：Hits @ 1，即目标项在前 1 名中的比例。
+            hits3：Hits @ 3，即目标项在前 3 名中的比例
+            hits10：Hits @ 10，即目标项在前 10 名中的比例
+    MRR（Mean Reciprocal Rank，平均倒数排名）是一种用于评估信息检索系统和推荐系统的指标。它衡量的是目标项在预测排序中的排名的倒数的平均值。其计算方式如下：
+ 。
+1. 计算每个目标项的排名倒数：
+如果目标项在第 𝑘个位置上，那么其倒数排名是 1/𝑘
+2. 计算所有目标项的倒数排名的平均值：
+对所有目标项的倒数排名取平均值，得到 MRR。
+MRR 的值范围是 (0, 1]，越接近 1 表示预测越准确。
+    """
     with torch.no_grad():
 
-        ranks = sort_and_rank(score, labels)
+        ranks = sort_and_rank(score, labels)  # 计算每个样本的排名，却对目标样本在排序结果中的位置
 
-        ranks += 1 # change to 1-indexed
+        ranks += 1 # change to 1-indexed  # 将排名加1，使其从1开始
 
-        mrr = torch.mean(1.0 / ranks.float())
+        mrr = torch.mean(1.0 / ranks.float())  # 计算mrr
 
         hits1 = torch.mean((ranks <= hits[0]).float())
         hits3 = torch.mean((ranks <= hits[1]).float())
@@ -113,6 +144,8 @@ def calc_raw_mrr(score, labels, hits=[]):
 #
 #######################################################################
 
+# 这两个函数用于在评估知识图谱补全模型时，对候选的头实体（h）或尾实体（t）进行过滤。过滤的目的是排除训练集、验证集和测试集中已经存在的三元组，
+# 以便更准确地评估模型在未见过的三元组上的表现。
 def filter_h(triplets_to_filter, target_h, target_r, target_t, num_entities):
     target_h, target_r, target_t = int(target_h), int(target_r), int(target_t)
     filtered_h = []
@@ -139,8 +172,12 @@ def filter_t(triplets_to_filter, target_h, target_r, target_t, num_entities):
             filtered_t.append(t)
     return torch.LongTensor(filtered_t)
 
+# 这个函数 get_filtered_rank 用于计算在过滤后的候选实体集合中，目标实体的排名。这个过程是知识图谱评估的一部分，用于评估模型预测的准确性。
 def get_filtered_rank(num_entity, score, h, r, t, test_size, triplets_to_filter, entity):
     """ Perturb object in the triplets
+    entity：字符串，值为 'object' 或 'subject'，表示要计算的是尾实体（object）还是头实体（subject）的排名。
+    这个函数的目的是在评估模型时，计算目标实体在过滤后的候选实体集合中的排名。通过这种方式，可以更加准确地评估模型在知识图谱补全任务中的表现，
+    因为它排除了那些已经在训练集、验证集和测试集中存在的三元组的影响。
     """
     num_entities = num_entity
     ranks = []
@@ -166,27 +203,40 @@ def get_filtered_rank(num_entity, score, h, r, t, test_size, triplets_to_filter,
 
 
 def calc_filtered_test_mrr(num_entity, score, train_triplets, valid_triplets, valid_triplets2, test_triplets, entity, hits=[]):
+    """
+    :param num_entity: 实体的总数。
+    :param score: 模型输出的得分矩阵，形状为 (test_size, num_entities)，表示每个测试样本的每个实体的得分。
+    :param train_triplets:
+    :param valid_triplets:
+    :param valid_triplets2: 第二个验证集中的三元组（如果有）。
+    :param test_triplets:
+    :param entity: 字符串，值为 'object' 或 'subject'，表示要计算的是尾实体（object）还是头实体（subject）的排名。
+    :param hits: 一个包含三个整数的列表，分别表示 Hits@1, Hits@3 和 Hits@10 的计算范围。
+    :return:
+    函数计算过滤后的测试集上的 MRR（平均倒数排名）和 Hits@K 指标。这个函数用于评估知识图谱嵌入模型在过滤条件下的预测效果。所谓过滤条件，
+    即排除训练集、验证集和测试集中已经存在的三元组的影响，只考虑模型在这些数据之外的预测能力。
+    """
     with torch.no_grad():
+        # 提取测试集中的头实体、关系和尾实体
         h = test_triplets[:, 0]
         r = test_triplets[:, 1]
         t = test_triplets[:, 2]
         test_size = test_triplets.shape[0]
-
+        # 将训练集、验证集和测试集的三元组转换为张量格式
         train_triplets = torch.Tensor([[quad[0], quad[1], quad[2]] for quad in train_triplets])
         valid_triplets = torch.Tensor([[quad[0], quad[1], quad[2]] for quad in valid_triplets])
         valid_triplets2 = torch.Tensor([[quad[0], quad[1], quad[2]] for quad in valid_triplets2])
         test_triplets = torch.Tensor([[quad[0], quad[1], quad[2]] for quad in test_triplets])
-
+        # 合并所有三元组，并转换为集合形式，以便进行过滤
         triplets_to_filter = torch.cat([train_triplets, valid_triplets, valid_triplets2, test_triplets]).tolist()
-
         triplets_to_filter = {tuple(triplet) for triplet in triplets_to_filter}
-
+        # 计算过滤后的排名
         ranks = get_filtered_rank(num_entity, score, h, r, t, test_size, triplets_to_filter, entity)
-
+        # 将排名从0索引转换为1索引
         ranks += 1 # change to 1-indexed
-
+        # 计算 MRR（平均倒数排名）
         mrr = torch.mean(1.0 / ranks.float())
-
+        # 计算 Hits@1, Hits@3 和 Hits@10
         hits1 = torch.mean((ranks <= hits[0]).float())
         hits3 = torch.mean((ranks <= hits[1]).float())
         hits10 = torch.mean((ranks <= hits[2]).float())
@@ -195,7 +245,7 @@ def calc_filtered_test_mrr(num_entity, score, train_triplets, valid_triplets, va
 
 #######################################################################
 #
-# Utility functions for evaluations (time-aware-filtered)
+# Utility functions for evaluations (time-aware-filtered) 用于评估的实用函数（时间感知过滤）
 #
 #######################################################################
 

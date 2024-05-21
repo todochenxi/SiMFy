@@ -47,27 +47,32 @@ class TimeEncode(nn.Module):
     """
     out = linear(time_scatter): 1-->time_dims
     out = cos(out)
+    时间信息嵌入到一个高维空间中，以便神经网络能够处理时间序列数据。其基本原理是将输入时间通过线性变换，然后应用 cos 函数，得到时间特征的嵌入表示。
     """
 
     def __init__(self, dim):
         super(TimeEncode, self).__init__()
-        self.dim = dim
-        self.w = nn.Linear(1, dim)
-        self.reset_parameters()
+        self.dim = dim  # 嵌入维度
+        self.w = nn.Linear(1, dim)  # 定义一个先行曾，将输入从1维变换到dim维
+        self.reset_parameters()  # 初始化线性层的函数
 
     def reset_parameters(self, ):
+        # np.linspace(0, (self.dim - 1) / math.sqrt(self.dim), self.dim, dtype=np.float32)：
+        # 生成一个从 0 到 (self.dim - 1) / math.sqrt(self.dim) 的等差数列，共有 self.dim 个元素。
+        # 1 / math.sqrt(self.dim) ** np.linspace(...)：对等差数列中的每个元素取 1 / sqrt(dim) 的幂次。
+        # torch.from_numpy(...).reshape(self.dim, -1)：将生成的数组转换为 PyTorch 张量，并调整形状为 (self.dim, 1)。
         self.w.weight = nn.Parameter(
             (torch.from_numpy(1 / math.sqrt(self.dim) ** np.linspace(0, (self.dim - 1) / math.sqrt(self.dim), self.dim,
                                                                      dtype=np.float32))).reshape(self.dim, -1))
         self.w.bias = nn.Parameter(torch.zeros(self.dim))
 
-        self.w.weight.requires_grad = False
+        self.w.weight.requires_grad = False  # 训练中不更新
         self.w.bias.requires_grad = False
 
     @torch.no_grad()
     def forward(self, t):
         output = torch.cos(self.w(t.reshape((-1, 1))))
-        return output
+        return output  # (batch_size, dim)
 
 class TimeSimfy(nn.Module):
     def __init__(self, num_e, num_rel, num_t, embedding_dim):
@@ -79,10 +84,12 @@ class TimeSimfy(nn.Module):
 
         # embedding initiation
         self.rel_embeds = nn.Parameter(torch.zeros(2 * self.num_rel, embedding_dim))
+        # 对 self.rel_embeds 进行 Xavier 均匀初始化，并根据 ReLU 激活函数的增益值来设置初始化范围。
+        # Xavier 初始化方法会将权重初始化到一个较小的范围，以便在正向传播过程中保持激活值的较小方差，从而减少梯度消失的可能性。
         nn.init.xavier_uniform_(self.rel_embeds, gain=nn.init.calculate_gain('relu'))
         self.entity_embeds = nn.Parameter(torch.zeros(self.num_e, embedding_dim))
         nn.init.xavier_uniform_(self.entity_embeds, gain=nn.init.calculate_gain('relu'))
-
+        # 是一个线性层，用于整合实体、关系和时间的嵌入向量，并输出预测结果。
         self.similarity_pred_layer = nn.Linear(3 * embedding_dim, embedding_dim)
         self.weights_init(self.similarity_pred_layer)
 
@@ -98,6 +105,7 @@ class TimeSimfy(nn.Module):
 
     @staticmethod
     def weights_init(m):
+        #  方法用于初始化模型的参数。如果 m 是线性层，则使用 Xavier 初始化方法初始化其权重。
         if isinstance(m, nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain('relu'))
 

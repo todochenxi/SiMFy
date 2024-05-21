@@ -28,6 +28,7 @@ def load_quadruples(inPath, fileName, num_r):
             tail = int(line_split[2])
             rel = int(line_split[1])
             time = int(line_split[3])
+            # 这是因为在知识图谱中,通常会对每个关系定义一个反向关系(inverse relation)。将原始关系id加上关系总数,就可以得到该关系对应的反向关系id。
             quadrupleList.append([tail, rel + num_r, head, time])
     times = list(times)
     times.sort()
@@ -45,24 +46,26 @@ def get_data_with_t(data, tim):
 
 
 def get_freq(dataset):
+    # all_data 包含test_data, all_data_history 不包含test_data
     num_e, num_r = get_total_number('./data/{}'.format(dataset), 'stat.txt')
 
     train_data, train_times = load_quadruples('./data/{}'.format(dataset), 'train.txt', num_r)
     dev_data, dev_times = load_quadruples('./data/{}'.format(dataset), 'valid.txt', num_r)
     test_data, test_times = load_quadruples('./data/{}'.format(dataset), 'test.txt', num_r)
-    all_data = np.concatenate((train_data, dev_data, test_data), axis=0)
-    all_times = np.concatenate((train_times, dev_times, test_times))
+    all_data = np.concatenate((train_data, dev_data, test_data), axis=0)  # 扩充行
+    all_times = np.concatenate((train_times, dev_times, test_times))  # 扩充列
 
     save_dir_obj = './data/{}/history_seq/'.format(dataset)
 
     mkdirs(save_dir_obj)
 
     # get object_entities
-    num_r_2 = num_r * 2
+    num_r_2 = num_r * 2  # 2倍关系数
     row = all_data[:, 0] * num_r_2 + all_data[:, 1]
-    col_rel = all_data[:, 1]
-    d_ = np.ones(len(row))
-    tail_rel = sp.csr_matrix((d_, (row, col_rel)), shape=(num_e * num_r_2, num_r_2))
+    col_rel = all_data[:, 1]  # 矩阵的列索引,就是原始四元组中的关系id。
+    d_ = np.ones(len(row))  # [1, 1, ....]
+
+    tail_rel = sp.csr_matrix((d_, (row, col_rel)), shape=(num_e * num_r_2, num_r_2)) # 创建一个压缩行稀疏矩阵(CSR矩阵)。矩阵的形状为(实体总数 * 关系总数, 关系总数)。
     sp.save_npz('./data/{}/history_seq/h_r_seq_rel.npz'.format(dataset), tail_rel)
 
     # get object_entities (train + valid)
